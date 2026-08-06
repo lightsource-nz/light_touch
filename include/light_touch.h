@@ -2,7 +2,7 @@
 #define _LIGHT_TOUCH_H
 
 #include <light.h>
-#include <light_display_ioport.h>
+#include <light_ioport.h>
 
 #include <stdint.h>
 #include <stdbool.h>

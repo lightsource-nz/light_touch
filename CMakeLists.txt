@@ -12,11 +12,11 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/src/touch.c
 )
 
-# light_display_ioport is an aggregate submodule, reused here for its I2C transport --
+# light_ioport is an aggregate submodule, reused here for its I2C transport --
 # it has no display/pixel coupling (struct io_context/i2c_state are fully generic), so
 # light_touch depends on it the same way light_display does
 target_link_libraries(
         light_touch PUBLIC
-        light_display_ioport
+        light_ioport
         light_core
 )
