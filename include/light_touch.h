@@ -13,6 +13,27 @@
 
 #define LIGHT_TOUCH_MAX_DEVICES                 8
 
+// recognised gesture kinds. directions are expressed in the touch device's OWN coordinate
+// space, which is the panel's physical orientation: SWIPE_UP means the finger travelled
+// toward y=0, SWIPE_LEFT toward x=0. an app whose render context is rotated
+// (rend_context_set_rotation()) draws in a different space and is responsible for mapping
+// these onto it -- light_touch has no render context to consult
+#define TOUCH_GESTURE_NONE                      0
+#define TOUCH_GESTURE_SWIPE_UP                  1
+#define TOUCH_GESTURE_SWIPE_DOWN                2
+#define TOUCH_GESTURE_SWIPE_LEFT                3
+#define TOUCH_GESTURE_SWIPE_RIGHT               4
+
+struct touch_gesture {
+        // one of TOUCH_GESTURE_* above
+        uint8_t type;
+        // where the finger went down, and where it lifted -- both in device coordinates
+        uint16_t start_x;
+        uint16_t start_y;
+        uint16_t end_x;
+        uint16_t end_y;
+};
+
 struct touch_device;
 struct touch_driver
 {
@@ -46,6 +67,22 @@ struct touch_device {
         uint16_t x;
         uint16_t y;
         struct touch_driver_context *driver_ctx;
+
+        // --- gesture recognition, driven from light_touch_command_poll() ---
+        // how far the finger must travel along the dominant axis for a drag to count as a
+        // swipe, in device coordinates. defaults to an eighth of the device's shorter
+        // axis, so it scales with panel size; override per device if that doesn't suit
+        uint16_t swipe_min_distance;
+        // set while a touch is in progress, i.e. between a down and its matching release
+        bool gesture_tracking;
+        uint16_t gesture_start_x;
+        uint16_t gesture_start_y;
+        // most recent position seen while tracking -- the release sample itself usually
+        // carries no coordinates, so this is what the gesture's end point comes from
+        uint16_t gesture_last_x;
+        uint16_t gesture_last_y;
+        // type is TOUCH_GESTURE_NONE when nothing is waiting to be collected
+        struct touch_gesture gesture_pending;
 };
 struct touch_device_root {
         struct light_object header;
@@ -82,5 +119,22 @@ extern void light_touch_command_reset(struct touch_device *dev);
 // when a new touch was captured; returns false otherwise (nothing new since the last
 // poll). x_out/y_out are left untouched on a false return
 extern bool light_touch_command_poll(struct touch_device *dev, uint16_t *x_out, uint16_t *y_out);
+
+// collects the pending gesture and clears it, so each recognised gesture is reported
+// exactly once however often this is called. returns false and leaves *out untouched when
+// nothing is pending.
+//
+// a gesture is recognised when the finger LIFTS, not partway through the drag -- so the
+// reported start and end points are both final. that does mean nothing is reported until
+// the touch ends, and that it depends on the controller reporting the release at all
+// (CST816T does).
+//
+// only one gesture is held at a time: if a second completes before the first is collected,
+// the first is discarded rather than queued. poll often enough that this doesn't matter,
+// which for a periodic-task-driven app it will be
+extern bool light_touch_take_gesture(struct touch_device *dev, struct touch_gesture *out);
+// overrides the swipe travel threshold (see swipe_min_distance above). a driver-level
+// preference, not controller state, so it persists across light_touch_command_reset()
+extern void light_touch_set_swipe_min_distance(struct touch_device *dev, uint16_t distance);
 
 #endif

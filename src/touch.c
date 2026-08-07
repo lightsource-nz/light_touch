@@ -86,6 +86,17 @@ struct touch_device *light_touch_init_device_va(
         dev->x = 0;
         dev->y = 0;
         dev->driver_ctx = driver_ctx;
+        // light_object_alloc() doesn't zero -- an uninitialised gesture_tracking would
+        // make the first release look like the end of a drag from garbage coordinates
+        dev->gesture_tracking = false;
+        dev->gesture_start_x = 0;
+        dev->gesture_start_y = 0;
+        dev->gesture_last_x = 0;
+        dev->gesture_last_y = 0;
+        dev->gesture_pending.type = TOUCH_GESTURE_NONE;
+        // scaled off the shorter axis so the default is sane on any panel size, rather
+        // than a constant that suits whichever display happened to be developed against
+        dev->swipe_min_distance = (x_max < y_max ? x_max : y_max) / 8;
 
         light_object_add_va(&dev->header, &device_root.header, format, args);
         return dev;
@@ -100,14 +111,79 @@ void light_touch_command_reset(struct touch_device *dev)
         light_debug("device: %s", dev->header.id);
         dev->driver_ctx->driver->reset(dev);
 }
+// classifies the drag that just ended. the dominant axis wins, so a swipe only has to be
+// mostly straight -- a diagonal is reported as whichever of the two it leaned toward
+// rather than being rejected, which is the forgiving behaviour a finger on glass needs
+static uint8_t _classify_swipe(struct touch_device *dev, int32_t dx, int32_t dy)
+{
+        int32_t adx = dx < 0 ? -dx : dx;
+        int32_t ady = dy < 0 ? -dy : dy;
+
+        if(adx >= ady) {
+                if(adx < (int32_t)dev->swipe_min_distance)
+                        return TOUCH_GESTURE_NONE;
+                return dx > 0 ? TOUCH_GESTURE_SWIPE_RIGHT : TOUCH_GESTURE_SWIPE_LEFT;
+        }
+        if(ady < (int32_t)dev->swipe_min_distance)
+                return TOUCH_GESTURE_NONE;
+        // y grows downward in device coordinates, so a positive dy is a downward swipe
+        return dy > 0 ? TOUCH_GESTURE_SWIPE_DOWN : TOUCH_GESTURE_SWIPE_UP;
+}
+// edge-driven off dev->touch_active, so it costs nothing on the many polls where the state
+// hasn't changed, and is safe to call more often than samples actually arrive
+static void _track_gesture(struct touch_device *dev)
+{
+        if(dev->touch_active) {
+                if(!dev->gesture_tracking) {
+                        dev->gesture_tracking = true;
+                        dev->gesture_start_x = dev->x;
+                        dev->gesture_start_y = dev->y;
+                }
+                dev->gesture_last_x = dev->x;
+                dev->gesture_last_y = dev->y;
+                return;
+        }
+        if(!dev->gesture_tracking)
+                return;
+        dev->gesture_tracking = false;
+
+        uint8_t type = _classify_swipe(dev,
+                        (int32_t)dev->gesture_last_x - (int32_t)dev->gesture_start_x,
+                        (int32_t)dev->gesture_last_y - (int32_t)dev->gesture_start_y);
+        if(type == TOUCH_GESTURE_NONE)
+                return;
+
+        dev->gesture_pending.type = type;
+        dev->gesture_pending.start_x = dev->gesture_start_x;
+        dev->gesture_pending.start_y = dev->gesture_start_y;
+        dev->gesture_pending.end_x = dev->gesture_last_x;
+        dev->gesture_pending.end_y = dev->gesture_last_y;
+        light_debug("gesture %d on device '%s': (%d,%d) -> (%d,%d)", type, dev->header.id,
+                        dev->gesture_start_x, dev->gesture_start_y,
+                        dev->gesture_last_x, dev->gesture_last_y);
+}
 bool light_touch_command_poll(struct touch_device *dev, uint16_t *x_out, uint16_t *y_out)
 {
         bool got_sample = dev->driver_ctx->driver->poll(dev);
+        _track_gesture(dev);
         if(got_sample && dev->touch_active) {
                 if(x_out) *x_out = dev->x;
                 if(y_out) *y_out = dev->y;
         }
         return got_sample;
+}
+bool light_touch_take_gesture(struct touch_device *dev, struct touch_gesture *out)
+{
+        if(dev->gesture_pending.type == TOUCH_GESTURE_NONE)
+                return false;
+        if(out)
+                *out = dev->gesture_pending;
+        dev->gesture_pending.type = TOUCH_GESTURE_NONE;
+        return true;
+}
+void light_touch_set_swipe_min_distance(struct touch_device *dev, uint16_t distance)
+{
+        dev->swipe_min_distance = distance;
 }
 void light_touch_poll_devices(void)
 {
@@ -115,6 +191,9 @@ void light_touch_poll_devices(void)
                 struct touch_device *dev = device_root.device[i];
                 if(!dev)
                         continue;
-                dev->driver_ctx->driver->poll(dev);
+                // routed through the command entry point rather than straight to the
+                // driver, so gesture tracking sees every sample regardless of which path
+                // drove the poll
+                light_touch_command_poll(dev, NULL, NULL);
         }
 }
