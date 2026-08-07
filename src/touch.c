@@ -94,6 +94,7 @@ struct touch_device *light_touch_init_device_va(
         dev->gesture_last_x = 0;
         dev->gesture_last_y = 0;
         dev->gesture_pending.type = TOUCH_GESTURE_NONE;
+        dev->gesture_pending.from_hardware = false;
         // scaled off the shorter axis so the default is sane on any panel size, rather
         // than a constant that suits whichever display happened to be developed against
         dev->swipe_min_distance = (x_max < y_max ? x_max : y_max) / 8;
@@ -147,9 +148,25 @@ static void _track_gesture(struct touch_device *dev)
                 return;
         dev->gesture_tracking = false;
 
-        uint8_t type = _classify_swipe(dev,
-                        (int32_t)dev->gesture_last_x - (int32_t)dev->gesture_start_x,
-                        (int32_t)dev->gesture_last_y - (int32_t)dev->gesture_start_y);
+        int32_t dx = (int32_t)dev->gesture_last_x - (int32_t)dev->gesture_start_x;
+        int32_t dy = (int32_t)dev->gesture_last_y - (int32_t)dev->gesture_start_y;
+
+        // the controller's own engine gets first refusal: it's tuned by the vendor for its
+        // own sensor, and can distinguish things a coordinate pair can't. it only ever
+        // supplies the CLASSIFICATION though -- the endpoints below come from our own
+        // tracking either way, since no controller reports where the gesture happened
+        const struct touch_driver *drv = dev->driver_ctx->driver;
+        uint8_t type = TOUCH_GESTURE_NONE;
+        bool from_hardware = drv->read_gesture && drv->read_gesture(dev, &type);
+        if(!from_hardware)
+                type = _classify_swipe(dev, dx, dy);
+        else
+                // cheap cross-check while the CST816T's gesture register map is still
+                // unverified against a primary datasheet: a persistent disagreement here
+                // means the controller's idea of a direction doesn't match ours
+                light_debug("device '%s': hardware gesture %d, software would say %d",
+                                dev->header.id, type, _classify_swipe(dev, dx, dy));
+
         if(type == TOUCH_GESTURE_NONE)
                 return;
 
@@ -158,7 +175,9 @@ static void _track_gesture(struct touch_device *dev)
         dev->gesture_pending.start_y = dev->gesture_start_y;
         dev->gesture_pending.end_x = dev->gesture_last_x;
         dev->gesture_pending.end_y = dev->gesture_last_y;
-        light_debug("gesture %d on device '%s': (%d,%d) -> (%d,%d)", type, dev->header.id,
+        dev->gesture_pending.from_hardware = from_hardware;
+        light_debug("gesture %d on device '%s' (%s): (%d,%d) -> (%d,%d)",
+                        type, dev->header.id, from_hardware ? "hardware" : "software",
                         dev->gesture_start_x, dev->gesture_start_y,
                         dev->gesture_last_x, dev->gesture_last_y);
 }

@@ -32,6 +32,11 @@ struct touch_gesture {
         uint16_t start_y;
         uint16_t end_x;
         uint16_t end_y;
+        // true when the controller's own gesture engine classified this, false when
+        // light_touch did it from the sampled coordinates. informational -- the two are
+        // reported identically otherwise -- but it makes it obvious whether a controller's
+        // hardware recognition is actually doing anything
+        bool from_hardware;
 };
 
 struct touch_device;
@@ -47,6 +52,18 @@ struct touch_driver
         // synchronous call, not an async/DMA trio like light_display's update -- an I2C
         // touch-data read is a handful of bytes, nothing like a display frame transfer
         bool (*poll)(struct touch_device *);
+        // optional -- NULL when the controller has no gesture engine of its own. asked
+        // once, as a touch ends, for the controller's own classification of it as a
+        // TOUCH_GESTURE_* code. return false to decline, and light_touch classifies the
+        // touch itself from the coordinates it sampled; that's also the right answer for a
+        // gesture the controller recognises but light_touch has no equivalent for.
+        //
+        // a pure query: light_touch may call it without a gesture having occurred, and the
+        // driver is responsible for not reporting a stale result from an earlier touch.
+        // note that controllers which classify in hardware still don't report WHERE the
+        // gesture happened, so its start and end points come from light_touch's own
+        // tracking regardless of which path classified it
+        bool (*read_gesture)(struct touch_device *, uint8_t *type_out);
 };
 struct touch_driver_context
 {
