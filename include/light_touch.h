@@ -44,6 +44,11 @@ struct touch_driver
 {
         const uint8_t *name;
         struct touch_driver_context *(*spawn_context)();
+        //   frees whatever spawn_context() allocated. Called when the device holding that
+        // context is released, so a context outlives exactly the device it was spawned for.
+        // OPTIONAL: a driver whose context is not heap-allocated leaves this NULL and the
+        // release path skips it
+        void (*destroy_context)(struct touch_driver_context *ctx);
         void (*init_device)(struct touch_device *);
         void (*reset)(struct touch_device *);
         // samples the controller for a new touch state, writing into dev->touch_active/
