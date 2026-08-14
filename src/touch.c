@@ -35,7 +35,7 @@ static volatile uint16_t next_device_id;
 void light_touch_init()
 {
         next_device_id = 0;
-        light_object_init(&device_root.header, &ltype_touch_device_root);
+        light_object_init_static(&device_root.header, &ltype_touch_device_root);
         light_object_add(&device_root.header, NULL, "root_device");
 }
 struct touch_device_root *light_touch_device_get_root()
