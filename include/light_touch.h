@@ -16,7 +16,7 @@
 // recognised gesture kinds. directions are expressed in the touch device's OWN coordinate
 // space, which is the panel's physical orientation: SWIPE_UP means the finger travelled
 // toward y=0, SWIPE_LEFT toward x=0. an app whose render context is rotated
-// (rend_context_set_rotation()) draws in a different space and is responsible for mapping
+// (light_draw_context_set_rotation()) draws in a different space and is responsible for mapping
 // these onto it -- light_touch has no render context to consult
 #define TOUCH_GESTURE_NONE                      0
 #define TOUCH_GESTURE_SWIPE_UP                  1
