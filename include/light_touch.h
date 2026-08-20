@@ -105,6 +105,10 @@ struct touch_device {
         uint16_t gesture_last_y;
         // type is TOUCH_GESTURE_NONE when nothing is waiting to be collected
         struct touch_gesture gesture_pending;
+        //   set by light_touch_suppress_gesture() while a touch is in progress, cleared as
+        // the next touch begins: the release of a suppressed touch is classified as nothing
+        // at all. see the function below for why a consumer needs this
+        bool gesture_suppressed;
 };
 struct touch_device_root {
         struct light_object header;
@@ -158,5 +162,17 @@ extern bool light_touch_take_gesture(struct touch_device *dev, struct touch_gest
 // overrides the swipe travel threshold (see swipe_min_distance above). a driver-level
 // preference, not controller state, so it persists across light_touch_command_reset()
 extern void light_touch_set_swipe_min_distance(struct touch_device *dev, uint16_t distance);
+
+//   marks the touch CURRENTLY in progress as claimed, so its release is classified as no
+// gesture at all. cleared automatically when the next touch begins; a call with no touch in
+// progress does nothing.
+//
+//   this exists because the gesture pipeline and a drag consumer read the same finger: a drag
+// that scrolled a panel still ends in a release, and that release would otherwise be reported
+// as a swipe -- which an application typically maps onto navigation, so every horizontal
+// scroll would also navigate back. the consumer that used the movement is the only party that
+// knows it was used, so suppression is its call to make, made DURING the touch rather than by
+// racing to discard the gesture after it lands
+extern void light_touch_suppress_gesture(struct touch_device *dev);
 
 #endif

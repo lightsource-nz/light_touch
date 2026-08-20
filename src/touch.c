@@ -101,6 +101,7 @@ struct touch_device *light_touch_init_device_va(
         dev->gesture_last_y = 0;
         dev->gesture_pending.type = TOUCH_GESTURE_NONE;
         dev->gesture_pending.from_hardware = false;
+        dev->gesture_suppressed = false;
         // scaled off the shorter axis so the default is sane on any panel size, rather
         // than a constant that suits whichever display happened to be developed against
         dev->swipe_min_distance = (x_max < y_max ? x_max : y_max) / 8;
@@ -145,6 +146,9 @@ static void _track_gesture(struct touch_device *dev)
                         dev->gesture_tracking = true;
                         dev->gesture_start_x = dev->x;
                         dev->gesture_start_y = dev->y;
+                        // each touch starts unclaimed; a suppression applies to exactly the
+                        // touch whose movement was consumed, never to the one after it
+                        dev->gesture_suppressed = false;
                 }
                 dev->gesture_last_x = dev->x;
                 dev->gesture_last_y = dev->y;
@@ -153,6 +157,13 @@ static void _track_gesture(struct touch_device *dev)
         if(!dev->gesture_tracking)
                 return;
         dev->gesture_tracking = false;
+
+        //   a claimed touch classifies as nothing: its movement was already spent by whoever
+        // claimed it (a drag-scroll), and reporting it again as a swipe would make one finger
+        // movement mean two things. before the driver's own engine is asked, so a hardware
+        // classification cannot resurrect it either
+        if(dev->gesture_suppressed)
+                return;
 
         int32_t dx = (int32_t)dev->gesture_last_x - (int32_t)dev->gesture_start_x;
         int32_t dy = (int32_t)dev->gesture_last_y - (int32_t)dev->gesture_start_y;
@@ -209,6 +220,14 @@ bool light_touch_take_gesture(struct touch_device *dev, struct touch_gesture *ou
 void light_touch_set_swipe_min_distance(struct touch_device *dev, uint16_t distance)
 {
         dev->swipe_min_distance = distance;
+}
+void light_touch_suppress_gesture(struct touch_device *dev)
+{
+        // gated on a touch being in progress so a stray call between touches cannot leak
+        // forward and silently eat the NEXT gesture -- the failure would be an occasionally
+        // unresponsive swipe, which is miserable to diagnose from the symptom
+        if(dev->gesture_tracking)
+                dev->gesture_suppressed = true;
 }
 void light_touch_poll_devices(void)
 {
